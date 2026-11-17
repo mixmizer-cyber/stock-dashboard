@@ -1,0 +1,122 @@
+<!doctype html><html lang="th"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>ผลการติดตามสัญญาณ Scanner (Live)</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f6f7f9;--surface:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--pos:#0f9d58;--neg:#d93025;--accent:#2563eb}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--surface:#181b21;--text:#e8eaed;--muted:#9aa0a6;--line:#2a2e36;--pos:#34d399;--neg:#f87171;--accent:#60a5fa}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Sarabun,'Segoe UI',sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:24px;margin:4px 0}.sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.lab{color:var(--muted);font-size:12px}.val{font-size:26px;font-weight:700;margin-top:2px}
+.pos{color:var(--pos)}.neg{color:var(--neg)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.bar button{border:1px solid var(--line);background:var(--surface);color:var(--text);padding:7px 14px;border-radius:999px;cursor:pointer;font:inherit;font-size:13px}
+.bar button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.tw{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:900px}
+th{text-align:right;font-size:12px;color:var(--muted);font-weight:600;padding:11px 12px;border-bottom:1px solid var(--line);cursor:pointer;white-space:nowrap;user-select:none}
+td{text-align:right;padding:10px 12px;border-bottom:1px solid var(--line);font-size:14px;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}tr:last-child td{border-bottom:0}tbody tr:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+td.big{font-weight:700;font-size:15px}a{color:var(--text);text-decoration:none}a:hover{color:var(--accent)}
+.tag{font-size:10px;padding:1px 6px;border-radius:5px;color:#fff;vertical-align:middle;font-weight:600}.tag.th{background:#d97706}.tag.us{background:#4f46e5}
+.prog{height:5px;background:var(--line);border-radius:3px;width:90px;margin:0 0 3px auto}.prog i{display:block;height:100%;background:var(--accent);border-radius:3px}
+small{color:var(--muted);font-size:11px}.empty{text-align:center;color:var(--muted);padding:30px}
+th.s::after{content:" ▾";color:var(--accent)}th.s.up::after{content:" ▴"}
+.err{background:var(--surface);border:1px solid var(--neg);color:var(--neg);border-radius:12px;padding:14px 16px;margin-bottom:14px;font-size:14px}
+</style></head><body><div class="wrap">
+<h1>📈 ผลการติดตามสัญญาณ Scanner</h1>
+<div class="sub" id="sub">กำลังโหลดข้อมูล…</div>
+<div id="err"></div>
+<div class="cards" id="cards"></div>
+<div class="bar" id="bar">
+<button class="on" data-k="m" data-v="all">ทุกตลาด</button><button data-k="m" data-v="th">ไทย</button><button data-k="m" data-v="us">สหรัฐ</button>
+<span style="width:12px"></span>
+<button class="on" data-k="s" data-v="all">ทั้งหมด</button><button data-k="s" data-v="act">กำลังติดตาม</button><button data-k="s" data-v="done">ครบแล้ว</button></div>
+<div class="tw"><table id="t"><thead><tr>
+<th>หุ้น</th><th>วันที่สัญญาณ</th><th>ความคืบหน้า</th><th>ราคาตอนเกิดสัญญาณ</th><th>ราคาล่าสุด</th><th class="s">ผลตอบแทน</th><th>สูงสุด</th><th>ต่ำสุด</th><th>แนวโน้ม</th><th>วอลุ่ม</th><th>ฐาน (วัน)</th>
+</tr></thead><tbody></tbody></table></div></div>
+<script>
+/* ===== ตั้งค่า: แก้บรรทัดเดียวนี้ ===== */
+const REPO = "mixmizer-cyber/stock-dashboard";      // เช่น "mixmize/stock"  (repo ต้องเป็น public)
+const BRANCH = "main";
+const REFRESH_MIN = 10;         // รีเฟรชข้อมูลอัตโนมัติทุกกี่นาที (0 = ปิด)
+/* ===================================== */
+const TRACK_DAYS = 30;
+const BASE = new URLSearchParams(location.search).get("data") || `https://raw.githubusercontent.com/${REPO}/${BRANCH}/data/`;
+const $ = s => document.querySelector(s), tb = $("#t tbody"), f = {m:"all", s:"all"};
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function csv(txt) {
+  const L = txt.trim().split(/\r?\n/); if (L.length < 2) return [];
+  const h = L[0].split(",");
+  return L.slice(1).map(l => { const c = l.split(","); return Object.fromEntries(h.map((k, i) => [k, c[i]])); });
+}
+async function get(name) {
+  try { const r = await fetch(BASE + name + "?t=" + Date.now()); return r.ok ? csv(await r.text()) : null; }
+  catch (e) { return null; }
+}
+function spark(v, w = 110, h = 30) {
+  if (v.length < 2) return "";
+  const lo = Math.min(0, ...v), hi = Math.max(0, ...v), sp = (hi - lo) || 1, y = x => h - (x - lo) / sp * h;
+  const pts = v.map((x, i) => `${(i * w / (v.length - 1)).toFixed(1)},${y(x).toFixed(1)}`).join(" ");
+  const c = v[v.length - 1] >= 0 ? "#0f9d58" : "#d93025";
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><line x1="0" x2="${w}" y1="${y(0).toFixed(1)}" y2="${y(0).toFixed(1)}" stroke="currentColor" stroke-opacity=".25" stroke-dasharray="2 3"/><polyline fill="none" stroke="${c}" stroke-width="1.8" points="${pts}"/></svg>`;
+}
+const sg = x => (x > 0 ? "+" : "") + x.toFixed(2) + "%";
+const num = x => String(+x.toFixed(4));
+
+async function load() {
+  const rows = []; let ok = 0, newest = "";
+  for (const m of ["th", "us"]) {
+    let [sig, trk] = await Promise.all([get(m + "_signals.csv"), get(m + "_tracking.csv")]);
+    if (sig === null) continue; ok++;
+    const by = {}; if (trk === null) trk = [];
+    trk.forEach(t => (by[t.symbol + "|" + t.signal_date] ||= []).push(t));
+    sig.forEach(s => {
+      const t = (by[s.symbol + "|" + s.signal_date] || []).sort((a, b) => a.day_n - b.day_n);
+      const pcts = t.length ? t.map(x => Math.round(+x.pct_from_signal * 100) / 100 + 0) : [0];
+      const end = new Date(s.signal_date); end.setDate(end.getDate() + TRACK_DAYS);
+      if (t.length && t[t.length - 1].date > newest) newest = t[t.length - 1].date;
+      rows.push({m, symbol: s.symbol, date: s.signal_date, base_days: +s.base_days, close0: +s.signal_close, vol_x: +s.vol_x,
+        day_n: t.length ? +t[t.length - 1].day_n : 0, last: t.length ? +t[t.length - 1].close : +s.signal_close,
+        pct: pcts[pcts.length - 1], best: Math.max(...pcts), worst: Math.min(...pcts), pcts, done: end < new Date(new Date().toDateString())});
+    });
+  }
+  $("#err").innerHTML = !ok ? `<div class="err">โหลดข้อมูลไม่สำเร็จ — ตรวจค่า REPO ในโค้ด (ตอนนี้: <b>${esc(REPO)}</b>) และ repo ต้องเป็น public</div>` : "";
+  rows.sort((a, b) => b.date.localeCompare(a.date));
+  const p = rows.map(r => r.pct), mean = p.reduce((a, b) => a + b, 0) / (p.length || 1);
+  const med = p.length ? [...p].sort((a, b) => a - b)[Math.floor(p.length / 2)] : 0;
+  const win = p.length ? p.filter(x => x > 0).length / p.length * 100 : 0;
+  const card = (l, v, c = "") => `<div class="card"><div class="lab">${l}</div><div class="val ${c}">${v}</div></div>`;
+  $("#cards").innerHTML = card("สัญญาณทั้งหมด", rows.length) + card("กำลังติดตาม", rows.filter(r => !r.done).length) +
+    card("อัตราชนะ (ล่าสุด)", p.length ? win.toFixed(0) + "%" : "—") +
+    card("เฉลี่ย", p.length ? (mean >= 0 ? "+" : "") + mean.toFixed(1) + "%" : "—", mean >= 0 ? "pos" : "neg") +
+    card("มัธยฐาน", p.length ? (med >= 0 ? "+" : "") + med.toFixed(1) + "%" : "—", med >= 0 ? "pos" : "neg");
+  tb.innerHTML = rows.map(r => {
+    const yf = r.symbol + (r.m === "th" ? ".BK" : ""), cls = r.pct > 0 ? "pos" : r.pct < 0 ? "neg" : "";
+    return `<tr data-m="${r.m}" data-s="${r.done ? "done" : "act"}">
+<td data-v="${esc(r.symbol)}"><a href="https://finance.yahoo.com/quote/${esc(yf)}" target="_blank" rel="noopener"><b>${esc(r.symbol)}</b></a> <span class="tag ${r.m}">${r.m.toUpperCase()}</span></td>
+<td data-v="${r.date}">${r.date}</td>
+<td data-v="${r.day_n}"><div class="prog"><i style="width:${Math.min(100, r.day_n / TRACK_DAYS * 100).toFixed(0)}%"></i></div><small>${r.done ? "ครบ 30 วัน" : "วันที่ " + r.day_n + "/" + TRACK_DAYS}</small></td>
+<td data-v="${r.close0}">${num(r.close0)}</td><td data-v="${r.last}">${num(r.last)}</td>
+<td data-v="${r.pct}" class="${cls} big">${sg(r.pct)}</td>
+<td data-v="${r.best}" class="pos">${(r.best >= 0 ? "+" : "") + r.best.toFixed(1)}%</td>
+<td data-v="${r.worst}" class="neg">${(r.worst >= 0 ? "+" : "") + r.worst.toFixed(1)}%</td>
+<td>${spark(r.pcts)}</td><td data-v="${r.vol_x}">${r.vol_x}×</td><td data-v="${r.base_days}">${r.base_days}</td></tr>`;
+  }).join("");
+  const now = new Date().toLocaleString("th-TH", {dateStyle: "short", timeStyle: "short"});
+  $("#sub").textContent = `ข้อมูลถึงวันที่ ${newest || "—"} · โหลดเมื่อ ${now} · ติดตาม ${TRACK_DAYS} วันนับจากราคาปิดวันที่เกิดสัญญาณ · ผลในอดีตไม่ได้รับประกันอนาคต`;
+  apply();
+}
+function apply() { [...tb.rows].forEach(r => r.style.display = (f.m == "all" || r.dataset.m == f.m) && (f.s == "all" || r.dataset.s == f.s) ? "" : "none"); }
+$("#bar").onclick = e => { const b = e.target.closest("button"); if (!b) return; f[b.dataset.k] = b.dataset.v;
+  document.querySelectorAll(`[data-k=${b.dataset.k}]`).forEach(x => x.classList.toggle("on", x == b)); apply(); };
+document.querySelectorAll("th").forEach((th, i) => th.onclick = () => {
+  const up = th.classList.contains("s") && !th.classList.contains("up");
+  document.querySelectorAll("th").forEach(x => x.classList.remove("s", "up")); th.classList.add("s"); if (up) th.classList.add("up");
+  const v = r => { const x = r.cells[i].dataset.v; return x === undefined ? 0 : (isNaN(x) ? x : +x); };
+  [...tb.rows].sort((a, b) => (v(a) > v(b) ? 1 : -1) * (up ? 1 : -1)).forEach(r => tb.appendChild(r)); });
+load(); if (REFRESH_MIN > 0) setInterval(load, REFRESH_MIN * 60000);
+</script></body></html>
